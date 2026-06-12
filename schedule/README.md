@@ -1,0 +1,58 @@
+# Schedule — 极简日程表
+
+这是一个极简的日程表示例项目，包含后端（FastAPI + SQLite）与前端（React + Vite）。
+
+目录结构（相关）:
+
+- `backend/` — FastAPI 后端，入口 `main.py`，数据库文件 `schedule.db`。
+- `frontend/` — React 前端，使用 Vite 开发服务器。
+- `start.sh` — 简单脚本同时启动后端与前端（开发模式）。
+
+主要特性：
+
+- 基于 SQLite 的轻量持久化（events 表）
+- 提供 CRUD REST API：`/api/v1/events`
+- 前端按月拉取并显示事件，支持添加、编辑、删除、多选删除
+
+快速开始：
+
+1. 安装后端依赖（建议在虚拟环境中运行）：
+
+```bash
+cd schedule/backend
+pip install -r requirements.txt
+```
+
+2. 在项目根运行启动脚本（同时启动后端和前端）:
+
+```bash
+chmod +x start.sh
+./start.sh
+```
+
+3. 打开浏览器：
+
+- 前端: `http://localhost:5173/`
+- 后端（API 文档）: `http://localhost:3000/api/docs`
+
+常见 API:
+
+- `GET /api/v1/events?start=YYYY-MM-DD&end=YYYY-MM-DD` — 列出指定范围内事件
+- `GET /api/v1/events/{id}` — 获取事件
+- `POST /api/v1/events` — 创建事件，JSON body 包含 `title`, `start_time`, `end_time?(optional)`, `note?(optional)`
+- `PUT /api/v1/events/{id}` — 更新事件（部分字段可选）
+- `DELETE /api/v1/events/{id}` — 删除事件
+- `DELETE /api/v1/events` — 批量删除，JSON body: `{ "ids": [1,2,3] }`
+
+说明与注意事项:
+
+- 数据库文件 `backend/schedule.db` 会在第一次启动时自动创建。
+- 时间字符串使用 ISO 格式（含时区偏移，如 `2026-06-13T10:00:00+08:00`）。
+- 后端在插入/更新时会校验 `start_time` 与 `end_time` 是否同一天（若提供 `end_time`）。
+
+如需进一步改进：
+
+- 增加用户认证和多用户支持
+- 更健壮的时间/时区处理（使用 `pytz` / `zoneinfo`）
+- 将 SQLite 替换为 PostgreSQL 等生产级数据库
+
