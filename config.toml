@@ -1,0 +1,18 @@
+language = "zh"
+
+[[projects]]
+name = "my-project"
+
+[projects.agent]
+type = "codex"
+[projects.agent.options]
+work_dir = "/Users/horris/Documents/Codex/2026-06-10/iphone"
+mode = "full-auto"
+
+[[projects.platforms]]
+type = "weixin"
+
+[projects.platforms.options]
+token = "0f993b7a8d34@im.bot:0600005dd3b99f369351bd6619cc75c6a385c3"
+base_url = "https://ilinkai.weixin.qq.com"
+account_id = "0f993b7a8d34@im.bot"

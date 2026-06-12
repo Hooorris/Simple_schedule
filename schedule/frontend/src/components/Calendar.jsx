@@ -1,0 +1,42 @@
+import { useMemo } from 'react'
+
+export default function Calendar({ year, month, selDate, busyDates, onSelect }) {
+  const cells = useMemo(() => {
+    const first = new Date(year, month - 1, 1).getDay()
+    const days = new Date(year, month, 0).getDate()
+    const arr = []
+    for (let i = 0; i < first; i++) arr.push(null)
+    for (let d = 1; d <= days; d++) arr.push(d)
+    return arr
+  }, [year, month])
+
+  const today = new Date().toISOString().slice(0, 10)
+  const daysCn = ['日', '一', '二', '三', '四', '五', '六']
+
+  return (
+    <div>
+      <div className="grid grid-cols-7 text-center text-sm text-gray-400 mb-1">
+        {daysCn.map(d => <div key={d} className="py-1">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-px bg-gray-200 rounded-lg overflow-hidden">
+        {cells.map((d, i) => {
+          if (d === null) return <div key={'e' + i} className="bg-white min-h-[60px]" />
+          const ds = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0')
+          const isToday = ds === today
+          const isSel = ds === selDate
+          const busy = busyDates.has(ds)
+          let cls = 'bg-white min-h-[60px] p-1 cursor-pointer transition-colors'
+          if (isToday) cls += ' bg-blue-500 text-white'
+          else if (isSel) cls += ' bg-blue-50'
+          cls += ' hover:bg-blue-50'
+          return (
+            <div key={ds} onClick={() => onSelect(ds)} className={cls}>
+              <div className="text-sm font-medium">{d}</div>
+              {busy && <div className={'w-1.5 h-1.5 rounded-full mx-auto mt-1 ' + (isToday ? 'bg-white' : 'bg-gray-400')} />}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
