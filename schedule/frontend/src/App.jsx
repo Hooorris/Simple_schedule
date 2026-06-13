@@ -38,8 +38,13 @@ export default function App() {
 
   // 按选中日期筛选事件 — 后端现在使用 `date` 字段（YYYY-MM-DD）
   const dayEvents = events.filter(e => e.date === selDate)
-  // 按优先级排序（降序）以便在列表中优先展示高优先级项
-  const sortedDayEvents = [...dayEvents].sort((a, b) => (b.priority || 0) - (a.priority || 0))
+  // 未完成的放前面，已完成的靠后；同一状态下按优先级降序
+  const sortedDayEvents = [...dayEvents].sort((a, b) => {
+    const aDone = a.completed ? 1 : 0
+    const bDone = b.completed ? 1 : 0
+    if (aDone !== bDone) return aDone - bDone
+    return (b.priority || 0) - (a.priority || 0)
+  })
   const busyDates = new Set(events.map(e => e.date))
 
   // 创建事件并刷新列表
@@ -91,7 +96,8 @@ export default function App() {
       <EventList events={sortedDayEvents} selDate={selDate}
         selMode={selMode} selIds={selIds} onToggleSel={toggleSel}
         onEdit={e => setModal({ type: 'edit', event: e })}
-        onDelete={id => { if (confirm('Delete?')) del(id) }} />
+        onDelete={id => { if (confirm('Delete?')) del(id) }}
+        onToggleComplete={async (e) => { try { await upd(e.id, { completed: !e.completed }); } catch(err){ alert(err.message) } }} />
 
       {selMode && selIds.size > 0 && (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t shadow-lg flex justify-center z-40">

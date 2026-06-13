@@ -33,6 +33,9 @@ def get_db():
             conn.execute("ALTER TABLE events ADD COLUMN priority INTEGER DEFAULT 0")
         if 'completed' not in cols:
             conn.execute("ALTER TABLE events ADD COLUMN completed INTEGER DEFAULT 0")
+        if 'end_time' not in cols:
+            # 保留 end_time 以便在标记完成时记录结束时间
+            conn.execute("ALTER TABLE events ADD COLUMN end_time TEXT")
     except Exception:
         pass
     return conn
@@ -76,7 +79,13 @@ def list_events(start: str = Query(""), end: str = Query("")):
     conn = get_db()
     # 动态检测列以兼容老 schema（避免 ORDER BY 缺失列时报错）
     cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
-    order_clause = "ORDER BY priority DESC, date" if 'priority' in cols else "ORDER BY date"
+    # 优先把未完成项放前面（completed ASC），已完成项靠后；若无 completed 列则按 priority 排序
+    if 'completed' in cols and 'priority' in cols:
+        order_clause = "ORDER BY completed ASC, priority DESC, date"
+    elif 'priority' in cols:
+        order_clause = "ORDER BY priority DESC, date"
+    else:
+        order_clause = "ORDER BY date"
     if start and end:
         rows = conn.execute(f"SELECT * FROM events WHERE date BETWEEN ? AND ? {order_clause}", (start, end)).fetchall()
     else:
@@ -115,10 +124,24 @@ def update_event(eid: int, ev: EventUpdate):
     if ev.title is not None: data["title"] = ev.title
     if ev.date is not None: data["date"] = ev.date
     if ev.priority is not None: data["priority"] = ev.priority
-    if ev.completed is not None: data["completed"] = 1 if ev.completed else 0
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+    if ev.completed is not None:
+        new_completed = 1 if ev.completed else 0
+        # 如果从未完成变为已完成，记录 end_time；如果从已完成变为未完成，清除 end_time（若列存在）
+        if 'end_time' in cols:
+            if new_completed == 1 and (not data.get('completed')):
+                data['end_time'] = conn.execute("SELECT datetime('now')").fetchone()[0]
+            elif new_completed == 0:
+                data['end_time'] = None
+        data["completed"] = new_completed
     if ev.note is not None: data["note"] = ev.note
-    conn.execute("UPDATE events SET title=?, date=?, priority=?, completed=?, note=?, updated_at=datetime('now') WHERE id=?",
-        (data["title"], data["date"], data["priority"], data["completed"], data["note"], eid))
+    # 构建更新语句，包含 end_time 如果存在
+    if 'end_time' in cols:
+        conn.execute("UPDATE events SET title=?, date=?, priority=?, completed=?, note=?, end_time=?, updated_at=datetime('now') WHERE id=?",
+            (data["title"], data["date"], data["priority"], data["completed"], data["note"], data.get('end_time'), eid))
+    else:
+        conn.execute("UPDATE events SET title=?, date=?, priority=?, completed=?, note=?, updated_at=datetime('now') WHERE id=?",
+            (data["title"], data["date"], data["priority"], data["completed"], data["note"], eid))
     conn.commit()
     return dict(conn.execute("SELECT * FROM events WHERE id=?", (eid,)).fetchone())
 

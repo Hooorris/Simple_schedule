@@ -1,4 +1,4 @@
-export default function EventList({ events, selDate, selMode, selIds, onToggleSel, onEdit, onDelete }) {
+export default function EventList({ events, selDate, selMode, selIds, onToggleSel, onEdit, onDelete, onToggleComplete }) {
   const display = selDate.replace(/-/g, '/')
   return (
     <div className="mt-4">
@@ -15,12 +15,17 @@ export default function EventList({ events, selDate, selMode, selIds, onToggleSe
                   <input type="checkbox" checked={selIds.has(ev.id)} onChange={() => onToggleSel(ev.id)} className="w-4 h-4" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate">{ev.title}</div>
+                  <div className={`text-sm truncate ${ev.completed ? 'text-red-600' : 'font-medium'}`}>{ev.title}</div>
                   <div className="text-xs text-gray-400">优先级: {ev.priority ?? 0}</div>
                   {ev.note ? <div className="text-xs text-gray-500 truncate">{ev.note}</div> : null}
                 </div>
                 {!selMode && (
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {ev.completed ? (
+                      <button onClick={() => onToggleComplete(ev)} className="text-xs text-gray-500 hover:bg-gray-100 px-2 py-1 rounded">Undo</button>
+                    ) : (
+                      <button onClick={() => onToggleComplete(ev)} className="text-xs text-green-600 hover:bg-green-50 px-2 py-1 rounded">Complete</button>
+                    )}
                     <button onClick={() => onEdit(ev)} className="text-xs text-blue-500 hover:bg-blue-50 px-2 py-1 rounded">Edit</button>
                     <button onClick={() => onDelete(ev.id)} className="text-xs text-red-400 hover:bg-red-50 px-2 py-1 rounded">Del</button>
                   </div>
