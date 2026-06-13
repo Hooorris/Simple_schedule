@@ -30,18 +30,17 @@ export default function Calendar({ year, month, selDate, busyDates, eventsByDate
           const bg = isToday ? 'bg-green-500' : isSel ? 'bg-blue-50' : 'bg-white'
           let cls = `${base} ${bg} hover:bg-blue-50`
           const dayEvents = eventsByDate[ds] || []
+          const pendingCount = dayEvents.filter(ev => !ev.completed).length
+          const doneCount = dayEvents.filter(ev => ev.completed).length
           return (
             <div key={ds} onClick={() => onSelect(ds)} className={cls}>
               <div className={"text-sm font-medium " + (isToday ? 'text-white' : 'text-gray-800')}>{d}</div>
               {busy && <div className={'w-1.5 h-1.5 rounded-full mx-auto mt-1 ' + (isToday ? 'bg-white' : 'bg-gray-400')} />}
-              {/* 显示优先级前3条任务的缩略（单行、溢出省略） */}
+              {/* 显示当天事件计数：待办 / 已完成 */}
               {dayEvents.length > 0 && (
-                <div className="mt-1 space-y-0.5">
-                  {dayEvents.slice(0,3).map(ev => (
-                    <div key={ev.id} className="text-xs text-gray-700 truncate whitespace-nowrap overflow-hidden" title={ev.title}>
-                      {ev.title}
-                    </div>
-                  ))}
+                <div className="mt-1 text-xs">
+                  <div className="text-yellow-600">待办：{pendingCount}</div>
+                  <div className="text-green-600">已完成：{doneCount}</div>
                 </div>
               )}
             </div>
