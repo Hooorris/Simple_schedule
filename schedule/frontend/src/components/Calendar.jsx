@@ -26,7 +26,7 @@ export default function Calendar({ year, month, selDate, busyDates, eventsByDate
           const isSel = ds === selDate
           const busy = busyDates.has(ds)
           // compute background and text classes explicitly
-          const base = 'h-24 p-1 cursor-pointer transition-colors'
+          const base = 'h-20 p-1 cursor-pointer transition-colors'
           const bg = isSel ? 'bg-blue-50' : 'bg-white'
           let cls = `${base} ${bg} hover:bg-blue-50`
           const dayEvents = eventsByDate[ds] || []
