@@ -46,6 +46,16 @@ export default function App() {
     return (b.priority || 0) - (a.priority || 0)
   })
   const busyDates = new Set(events.map(e => e.date))
+  // 将事件按日期分组并按优先级排序，供 Calendar 渲染每日缩略
+  const eventsByDate = events.reduce((acc, e) => {
+    if (!e.date) return acc
+    acc[e.date] = acc[e.date] || []
+    acc[e.date].push(e)
+    return acc
+  }, {})
+  Object.keys(eventsByDate).forEach(d => {
+    eventsByDate[d].sort((a, b) => (b.priority || 0) - (a.priority || 0))
+  })
 
   // 创建事件并刷新列表
   const add = async (data) => {
@@ -91,6 +101,7 @@ export default function App() {
         selMode={selMode} onToggleSel={() => { setSelMode(!selMode); setSelIds(new Set()) }} />
 
       <Calendar year={year} month={month} selDate={selDate} busyDates={busyDates}
+        eventsByDate={eventsByDate}
         onSelect={d => { setSelDate(d); setSelMode(false); setSelIds(new Set()) }} />
 
       <EventList events={sortedDayEvents} selDate={selDate}

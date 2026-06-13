@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 
-export default function Calendar({ year, month, selDate, busyDates, onSelect }) {
+export default function Calendar({ year, month, selDate, busyDates, eventsByDate = {}, onSelect }) {
   const cells = useMemo(() => {
     const first = new Date(year, month - 1, 1).getDay()
     const days = new Date(year, month, 0).getDate()
@@ -29,10 +29,21 @@ export default function Calendar({ year, month, selDate, busyDates, onSelect }) 
           if (isToday) cls += ' bg-blue-500 text-white'
           else if (isSel) cls += ' bg-blue-50'
           cls += ' hover:bg-blue-50'
+          const dayEvents = eventsByDate[ds] || []
           return (
             <div key={ds} onClick={() => onSelect(ds)} className={cls}>
               <div className="text-sm font-medium">{d}</div>
               {busy && <div className={'w-1.5 h-1.5 rounded-full mx-auto mt-1 ' + (isToday ? 'bg-white' : 'bg-gray-400')} />}
+              {/* 显示优先级前3条任务的缩略（单行、溢出省略） */}
+              {dayEvents.length > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {dayEvents.slice(0,3).map(ev => (
+                    <div key={ev.id} className="text-xs text-gray-700 truncate whitespace-nowrap overflow-hidden" title={ev.title}>
+                      {ev.title}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )
         })}
