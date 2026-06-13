@@ -74,10 +74,13 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 @app.get("/api/v1/events")
 def list_events(start: str = Query(""), end: str = Query("")):
     conn = get_db()
+    # 动态检测列以兼容老 schema（避免 ORDER BY 缺失列时报错）
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+    order_clause = "ORDER BY priority DESC, date" if 'priority' in cols else "ORDER BY date"
     if start and end:
-        rows = conn.execute("SELECT * FROM events WHERE date BETWEEN ? AND ? ORDER BY priority DESC, date", (start, end)).fetchall()
+        rows = conn.execute(f"SELECT * FROM events WHERE date BETWEEN ? AND ? {order_clause}", (start, end)).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM events ORDER BY priority DESC, date").fetchall()
+        rows = conn.execute(f"SELECT * FROM events {order_clause}").fetchall()
     return [dict(r) for r in rows]
 
 @app.get("/api/v1/events/{eid}")
@@ -89,8 +92,17 @@ def get_event(eid: int):
 @app.post("/api/v1/events", status_code=201)
 def create_event(ev: EventCreate):
     conn = get_db()
-    cur = conn.execute("INSERT INTO events (title, date, priority, completed, note) VALUES (?,?,?,?,?)",
-        (ev.title, ev.date, ev.priority, 1 if ev.completed else 0, ev.note or ""))
+    # 兼容旧表：如果存在 `start_time` 且为 NOT NULL，需要提供默认值以避免约束错误
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+    values = (ev.title, ev.date, ev.priority, 1 if ev.completed else 0, ev.note or "")
+    if 'start_time' in cols:
+        # 填充一个合理的 start_time（使用 date 的午夜时间）以满足旧表的 NOT NULL 约束
+        start_time_val = f"{ev.date}T00:00:00"
+        cur = conn.execute("INSERT INTO events (title, date, priority, completed, note, start_time) VALUES (?,?,?,?,?,?)",
+            (ev.title, ev.date, ev.priority, 1 if ev.completed else 0, ev.note or "", start_time_val))
+    else:
+        cur = conn.execute("INSERT INTO events (title, date, priority, completed, note) VALUES (?,?,?,?,?)",
+            values)
     conn.commit()
     return dict(conn.execute("SELECT * FROM events WHERE id=?", (cur.lastrowid,)).fetchone())
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 
 // 弹窗组件：用于创建或编辑事件
-export default function EventModal({ type, date, event, onSave, onDelete, onClose }) {
+export default function EventModal({ type, date: initialDate, event, onSave, onDelete, onClose }) {
   const [title, setTitle] = useState('')
   const [date, setDate] = useState('')
   const [note, setNote] = useState('')
@@ -15,14 +15,14 @@ export default function EventModal({ type, date, event, onSave, onDelete, onClos
       setNote(event.note || '')
       setPriority(event.priority || 0)
       setCompleted(Boolean(event.completed))
-    } else if (date) {
+    } else if (initialDate) {
       setTitle('')
-      setDate(date)
+      setDate(initialDate)
       setNote('')
       setPriority(0)
       setCompleted(false)
     }
-  }, [event, date])
+  }, [event, initialDate])
 
   const submit = (e) => {
     e.preventDefault()
