@@ -7,6 +7,12 @@ export default function EventModal({ type, date: initialDate, event, onSave, onD
   const [note, setNote] = useState('')
   const [priority, setPriority] = useState(0)
   const [completed, setCompleted] = useState(false)
+  const [reminderEnabled, setReminderEnabled] = useState(false)
+  const [reminderKind, setReminderKind] = useState('once')
+  const [reminderTime, setReminderTime] = useState('09:00')
+  const [reminderDate, setReminderDate] = useState('')
+  const [reminderDay, setReminderDay] = useState(0)
+  const [reminderWebhook, setReminderWebhook] = useState('')
 
   useEffect(() => {
     if (event) {
@@ -21,19 +27,31 @@ export default function EventModal({ type, date: initialDate, event, onSave, onD
       setNote('')
       setPriority(0)
       setCompleted(false)
+      setReminderDate(initialDate)
     }
   }, [event, initialDate])
 
   const submit = (e) => {
     e.preventDefault()
     if (!title.trim()) return
-    onSave({
+    const payload = {
       title: title.trim(),
       date: date,
       priority: Number(priority) || 0,
       completed: Boolean(completed),
       note: note.trim(),
-    })
+    }
+    if (reminderEnabled) {
+      payload.reminder = {
+        kind: reminderKind,
+        time: reminderTime,
+        date: reminderKind === 'once' ? reminderDate : undefined,
+        day: (reminderKind === 'weekly' || reminderKind === 'monthly') ? Number(reminderDay) : undefined,
+        webhook: reminderWebhook || undefined,
+        enabled: true
+      }
+    }
+    onSave(payload)
   }
 
   return (
@@ -51,6 +69,41 @@ export default function EventModal({ type, date: initialDate, event, onSave, onD
           <label className="text-xs text-gray-500">Priority (higher first)</label>
           <input type="number" value={priority} onChange={e => setPriority(parseInt(e.target.value) || 0)} step="1"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 text-sm" />
+          <div className="mb-3">
+            <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={reminderEnabled} onChange={e => setReminderEnabled(e.target.checked)} /> 设置提醒</label>
+            {reminderEnabled && (
+              <div className="mt-2 space-y-2">
+                <div className="flex gap-2">
+                  <select value={reminderKind} onChange={e => setReminderKind(e.target.value)} className="px-2 py-1 border rounded">
+                    <option value="once">单次</option>
+                    <option value="daily">每天</option>
+                    <option value="weekly">每周</option>
+                    <option value="monthly">每月</option>
+                  </select>
+                  <input type="time" value={reminderTime} onChange={e => setReminderTime(e.target.value)} className="px-2 py-1 border rounded" />
+                </div>
+                {reminderKind === 'once' && (
+                  <input type="date" value={reminderDate} onChange={e => setReminderDate(e.target.value)} className="w-full px-2 py-1 border rounded" />
+                )}
+                {reminderKind === 'weekly' && (
+                  <select value={reminderDay} onChange={e => setReminderDay(e.target.value)} className="px-2 py-1 border rounded">
+                    <option value={0}>周日</option>
+                    <option value={1}>周一</option>
+                    <option value={2}>周二</option>
+                    <option value={3}>周三</option>
+                    <option value={4}>周四</option>
+                    <option value={5}>周五</option>
+                    <option value={6}>周六</option>
+                  </select>
+                )}
+                {reminderKind === 'monthly' && (
+                  <input type="number" min={1} max={31} value={reminderDay} onChange={e => setReminderDay(e.target.value)} className="w-24 px-2 py-1 border rounded" />
+                )}
+                <input value={reminderWebhook} onChange={e => setReminderWebhook(e.target.value)} placeholder="Webhook (optional)"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+            )}
+          </div>
           <label className="inline-flex items-center gap-2 text-sm mb-4"><input type="checkbox" checked={completed} onChange={e => setCompleted(e.target.checked)} /> 已完成</label>
           <div className="flex gap-2 justify-end">
             {type === 'edit' && (
