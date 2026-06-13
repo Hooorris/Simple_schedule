@@ -3,24 +3,24 @@ import { useState, useEffect } from 'react'
 // 弹窗组件：用于创建或编辑事件
 export default function EventModal({ type, date, event, onSave, onDelete, onClose }) {
   const [title, setTitle] = useState('')
-  const [start, setStart] = useState('')
-  const [end, setEnd] = useState('')
+  const [date, setDate] = useState('')
   const [note, setNote] = useState('')
-  const [costFactor, setCostFactor] = useState(0.0)
+  const [priority, setPriority] = useState(0)
+  const [completed, setCompleted] = useState(false)
 
   useEffect(() => {
     if (event) {
       setTitle(event.title)
-      setStart(event.start_time.slice(0, 16))
-      setEnd(event.end_time ? event.end_time.slice(0, 16) : '')
+      setDate(event.date)
       setNote(event.note || '')
-      setCostFactor(event.cost_factor || 0)
+      setPriority(event.priority || 0)
+      setCompleted(Boolean(event.completed))
     } else if (date) {
       setTitle('')
-      setStart(date + 'T09:00')
-      setEnd(date + 'T09:30')
+      setDate(date)
       setNote('')
-      setCostFactor(0.0)
+      setPriority(0)
+      setCompleted(false)
     }
   }, [event, date])
 
@@ -29,10 +29,10 @@ export default function EventModal({ type, date, event, onSave, onDelete, onClos
     if (!title.trim()) return
     onSave({
       title: title.trim(),
-      start_time: start + ':00+08:00',
-      end_time: end ? end + ':00+08:00' : null,
+      date: date,
+      priority: Number(priority) || 0,
+      completed: Boolean(completed),
       note: note.trim(),
-      cost_factor: costFactor,
     })
   }
 
@@ -43,17 +43,15 @@ export default function EventModal({ type, date, event, onSave, onDelete, onClos
         <form onSubmit={submit}>
           <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" autoFocus
             className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 text-sm" />
-          <label className="text-xs text-gray-500">Start Time</label>
-          <input type="datetime-local" value={start} onChange={e => setStart(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 text-sm" />
-          <label className="text-xs text-gray-500">End Time (optional)</label>
-          <input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)}
+          <label className="text-xs text-gray-500">Date</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 text-sm" />
           <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Note (optional)" rows={2}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 text-sm resize-none" />
-          <label className="text-xs text-gray-500">创意系数</label>
-          <input type="number" value={costFactor} onChange={e => setCostFactor(parseFloat(e.target.value) || 0)} step="0.01"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-4 text-sm" />
+          <label className="text-xs text-gray-500">Priority (higher first)</label>
+          <input type="number" value={priority} onChange={e => setPriority(parseInt(e.target.value) || 0)} step="1"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 text-sm" />
+          <label className="inline-flex items-center gap-2 text-sm mb-4"><input type="checkbox" checked={completed} onChange={e => setCompleted(e.target.checked)} /> 已完成</label>
           <div className="flex gap-2 justify-end">
             {type === 'edit' && (
               <button type="button" onClick={onDelete} className="px-4 py-2 rounded-lg text-sm text-red-500 hover:bg-red-50">Delete</button>

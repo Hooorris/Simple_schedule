@@ -8,18 +8,16 @@ export default function EventList({ events, selDate, selMode, selIds, onToggleSe
       ) : (
         <div className="space-y-1">
           {events.map(ev => {
-            const st = ev.start_time.slice(11, 16)
-            const et = ev.end_time ? ev.end_time.slice(11, 16) : ''
-            const t = et ? st + '~' + et : st
+            // 使用新的字段：`priority` 与 `completed`
             return (
-              <div key={ev.id} className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors group">
+              <div key={ev.id} className={`flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors group ${ev.completed ? 'opacity-60 line-through' : ''}`}>
                 {selMode && (
                   <input type="checkbox" checked={selIds.has(ev.id)} onChange={() => onToggleSel(ev.id)} className="w-4 h-4" />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm truncate">{ev.title}</div>
-                  <div className="text-xs text-gray-400">{t}</div>
-                  {ev.cost_factor ? <div className="text-xs text-blue-400">系数: {ev.cost_factor}</div> : null}
+                  <div className="text-xs text-gray-400">优先级: {ev.priority ?? 0}</div>
+                  {ev.note ? <div className="text-xs text-gray-500 truncate">{ev.note}</div> : null}
                 </div>
                 {!selMode && (
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

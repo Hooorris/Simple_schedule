@@ -49,6 +49,9 @@ chmod +x start.sh
 - 数据库文件 `backend/schedule.db` 会在第一次启动时自动创建。
 - 时间字符串使用 ISO 格式（含时区偏移，如 `2026-06-13T10:00:00+08:00`）。
 - 后端在插入/更新时会校验 `start_time` 与 `end_time` 是否同一天（若提供 `end_time`）。
+ - 事件模型已调整：不再记录开始/结束时间；改为使用 `date`（YYYY-MM-DD）、`priority`（整数，越大优先级越高）和 `completed`（布尔）。
+ - `POST /api/v1/events` 的 body 示例：
+	 `{ "title": "任务", "date": "2026-06-13", "priority": 5, "completed": false, "note": "可选" }`
 
 如需进一步改进：
 

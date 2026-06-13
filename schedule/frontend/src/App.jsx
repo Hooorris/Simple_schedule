@@ -36,8 +36,11 @@ export default function App() {
 
   useEffect(() => { fetchEvents() }, [fetchEvents])
 
-  const dayEvents = events.filter(e => e.start_time.slice(0, 10) === selDate)
-  const busyDates = new Set(events.map(e => e.start_time.slice(0, 10)))
+  // 按选中日期筛选事件 — 后端现在使用 `date` 字段（YYYY-MM-DD）
+  const dayEvents = events.filter(e => e.date === selDate)
+  // 按优先级排序（降序）以便在列表中优先展示高优先级项
+  const sortedDayEvents = [...dayEvents].sort((a, b) => (b.priority || 0) - (a.priority || 0))
+  const busyDates = new Set(events.map(e => e.date))
 
   // 创建事件并刷新列表
   const add = async (data) => {
@@ -85,7 +88,7 @@ export default function App() {
       <Calendar year={year} month={month} selDate={selDate} busyDates={busyDates}
         onSelect={d => { setSelDate(d); setSelMode(false); setSelIds(new Set()) }} />
 
-      <EventList events={dayEvents} selDate={selDate}
+      <EventList events={sortedDayEvents} selDate={selDate}
         selMode={selMode} selIds={selIds} onToggleSel={toggleSel}
         onEdit={e => setModal({ type: 'edit', event: e })}
         onDelete={id => { if (confirm('Delete?')) del(id) }} />

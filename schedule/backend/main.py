@@ -10,33 +10,49 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "schedule.db")
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # 新的 events 结构：使用 `date` 字段（YYYY-MM-DD），并增加 `priority` 与 `completed`
     conn.execute("CREATE TABLE IF NOT EXISTS events ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 100),"
-        "start_time TEXT NOT NULL,"
-        "end_time TEXT,"
+        "date TEXT NOT NULL,"
+        "priority INTEGER DEFAULT 0,"
+        "completed INTEGER DEFAULT 0,"
         "note TEXT DEFAULT '' CHECK(length(note) <= 500),"
-        "cost_factor REAL DEFAULT 0.0,"
         "created_at TEXT DEFAULT (datetime('now')),"
         "updated_at TEXT DEFAULT (datetime('now'))"
     ")")
+    # 兼容迁移：如果旧表存在但缺少新字段，尝试添加列并填充 date（从 start_time 截取日期）
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+        if 'date' not in cols:
+            conn.execute("ALTER TABLE events ADD COLUMN date TEXT")
+            # 如果存在 start_time 列，则尝试从中填充 date
+            if 'start_time' in cols:
+                conn.execute("UPDATE events SET date = substr(start_time,1,10) WHERE date IS NULL OR date = ''")
+        if 'priority' not in cols:
+            conn.execute("ALTER TABLE events ADD COLUMN priority INTEGER DEFAULT 0")
+        if 'completed' not in cols:
+            conn.execute("ALTER TABLE events ADD COLUMN completed INTEGER DEFAULT 0")
+    except Exception:
+        pass
     return conn
 
 def validate_no_cross_day(start: str, end: Optional[str]):
-    if not end: return
-    if start[:10] != end[:10]:
-        raise HTTPException(422, "start and end must be on the same day")
+    # 时间相关校验已废弃（项目改为按日期记录），保留空实现以兼容调用。
+    return
 
 class EventCreate(BaseModel):
     title: str
-    start_time: str
-    end_time: Optional[str] = None
+    date: str
+    priority: int = 0
+    completed: bool = False
     note: Optional[str] = ""
 
 class EventUpdate(BaseModel):
     title: Optional[str] = None
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
+    date: Optional[str] = None
+    priority: Optional[int] = None
+    completed: Optional[bool] = None
     note: Optional[str] = None
 
 class BatchDelete(BaseModel):
@@ -48,9 +64,9 @@ app = FastAPI(title="Schedule", version="1.0.0", docs_url="/api/docs")
 def db_events_direct(start: str = "", end: str = ""):
     conn = get_db()
     if start and end:
-        rows = conn.execute("SELECT * FROM events WHERE date(start_time) BETWEEN ? AND ? ORDER BY start_time", (start, end)).fetchall()
+        rows = conn.execute("SELECT * FROM events WHERE date BETWEEN ? AND ? ORDER BY priority DESC, date", (start, end)).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM events ORDER BY start_time").fetchall()
+        rows = conn.execute("SELECT * FROM events ORDER BY priority DESC, date").fetchall()
     return [dict(r) for r in rows]
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -59,9 +75,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def list_events(start: str = Query(""), end: str = Query("")):
     conn = get_db()
     if start and end:
-        rows = conn.execute("SELECT * FROM events WHERE date(start_time) BETWEEN ? AND ? ORDER BY start_time", (start, end)).fetchall()
+        rows = conn.execute("SELECT * FROM events WHERE date BETWEEN ? AND ? ORDER BY priority DESC, date", (start, end)).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM events ORDER BY start_time").fetchall()
+        rows = conn.execute("SELECT * FROM events ORDER BY priority DESC, date").fetchall()
     return [dict(r) for r in rows]
 
 @app.get("/api/v1/events/{eid}")
@@ -72,10 +88,9 @@ def get_event(eid: int):
 
 @app.post("/api/v1/events", status_code=201)
 def create_event(ev: EventCreate):
-    validate_no_cross_day(ev.start_time, ev.end_time)
     conn = get_db()
-    cur = conn.execute("INSERT INTO events (title, start_time, end_time, note, cost_factor) VALUES (?,?,?,?,?)",
-        (ev.title, ev.start_time, ev.end_time or "", ev.note or "", ev.cost_factor))
+    cur = conn.execute("INSERT INTO events (title, date, priority, completed, note) VALUES (?,?,?,?,?)",
+        (ev.title, ev.date, ev.priority, 1 if ev.completed else 0, ev.note or ""))
     conn.commit()
     return dict(conn.execute("SELECT * FROM events WHERE id=?", (cur.lastrowid,)).fetchone())
 
@@ -86,13 +101,12 @@ def update_event(eid: int, ev: EventUpdate):
     if not row: raise HTTPException(404)
     data = dict(row)
     if ev.title is not None: data["title"] = ev.title
-    if ev.start_time is not None: data["start_time"] = ev.start_time
-    if ev.end_time is not None: data["end_time"] = ev.end_time
+    if ev.date is not None: data["date"] = ev.date
+    if ev.priority is not None: data["priority"] = ev.priority
+    if ev.completed is not None: data["completed"] = 1 if ev.completed else 0
     if ev.note is not None: data["note"] = ev.note
-    if ev.cost_factor is not None: data["cost_factor"] = ev.cost_factor
-    validate_no_cross_day(data["start_time"], data["end_time"])
-    conn.execute("UPDATE events SET title=?, start_time=?, end_time=?, note=?, cost_factor=?, updated_at=datetime('now') WHERE id=?",
-        (data["title"], data["start_time"], data["end_time"], data["note"], data["cost_factor"], eid))
+    conn.execute("UPDATE events SET title=?, date=?, priority=?, completed=?, note=?, updated_at=datetime('now') WHERE id=?",
+        (data["title"], data["date"], data["priority"], data["completed"], data["note"], eid))
     conn.commit()
     return dict(conn.execute("SELECT * FROM events WHERE id=?", (eid,)).fetchone())
 
