@@ -25,14 +25,14 @@ export default function Calendar({ year, month, selDate, busyDates, eventsByDate
           const isToday = ds === today
           const isSel = ds === selDate
           const busy = busyDates.has(ds)
-          let cls = 'bg-white min-h-[60px] p-1 cursor-pointer transition-colors'
-          if (isToday) cls += ' bg-green-500 text-white'
-          else if (isSel) cls += ' bg-blue-50'
-          cls += ' hover:bg-blue-50'
+          // compute background and text classes explicitly
+          const base = 'min-h-[60px] p-1 cursor-pointer transition-colors'
+          const bg = isToday ? 'bg-green-500' : isSel ? 'bg-blue-50' : 'bg-white'
+          let cls = `${base} ${bg} hover:bg-blue-50`
           const dayEvents = eventsByDate[ds] || []
           return (
             <div key={ds} onClick={() => onSelect(ds)} className={cls}>
-              <div className="text-sm font-medium">{d}</div>
+              <div className={"text-sm font-medium " + (isToday ? 'text-white' : 'text-gray-800')}>{d}</div>
               {busy && <div className={'w-1.5 h-1.5 rounded-full mx-auto mt-1 ' + (isToday ? 'bg-white' : 'bg-gray-400')} />}
               {/* 显示优先级前3条任务的缩略（单行、溢出省略） */}
               {dayEvents.length > 0 && (
