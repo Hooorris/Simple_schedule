@@ -26,7 +26,7 @@ export default function Calendar({ year, month, selDate, busyDates, eventsByDate
           const isSel = ds === selDate
           const busy = busyDates.has(ds)
           let cls = 'bg-white min-h-[60px] p-1 cursor-pointer transition-colors'
-          if (isToday) cls += ' bg-blue-500 text-white'
+          if (isToday) cls += ' bg-green-500 text-white'
           else if (isSel) cls += ' bg-blue-50'
           cls += ' hover:bg-blue-50'
           const dayEvents = eventsByDate[ds] || []
