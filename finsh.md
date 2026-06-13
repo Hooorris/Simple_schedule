@@ -38,4 +38,17 @@
 - 自查：通过本地创建测试事件并在浏览器验证：日期格显示待办与已完成计数，且与后端 `/api/v1/events` 返回结果一致
 - 状态：已完成并推送到 `origin/main`（commit 7a13f1e）
 
+## 任务 2：提醒功能（初版）
+- 版本：90d7cf8
+- 修改文件：
+  - schedule/backend/main.py
+  - schedule/frontend/src/components/EventModal.jsx
+  - schedule/frontend/src/App.jsx
+- 实现内容：
+  - 在后端新增 `reminders` 表并提供 API：`POST/GET/PUT/DELETE /api/v1/reminders` 以及 `POST /api/v1/reminders/{id}/trigger`。
+  - 后端启动时运行后台线程，按规则（once/daily/weekly/monthly）轮询并触发提醒，支持可选 `webhook` 推送（POST JSON payload）。
+  - 前端在 `EventModal` 中新增提醒设置 UI（启用、类型、时间、单次日期或周/月选项、可选 webhook），保存事件时同步创建 reminder。
+- 自查：已在本地创建含提醒的事件，并观察到 reminders 表记录；手动触发 `/api/v1/reminders/{id}/trigger` 返回 payload 并可将 `enabled` 置为 false（单次提醒）。
+- 状态：已完成并推送到 `origin/main`（commit 90d7cf8）
+
 
