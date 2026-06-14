@@ -51,7 +51,12 @@ def get_db():
             "webhook TEXT,"
             "last_triggered TEXT,"
             "created_at TEXT DEFAULT (datetime('now'))"
-        )
+            ")")
+    except Exception:
+        pass
+    # 确保 DDL/迁移已提交
+    try:
+        conn.commit()
     except Exception:
         pass
     return conn
