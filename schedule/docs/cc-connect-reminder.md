@@ -88,3 +88,31 @@ python3 scripts/add_reminder.py --title "写周报" --date 2026-06-15 --priority
 - 未说明优先级时，默认 `priority=0`。
 - 未说明备注时，默认 `note=""`。
 - 日期含糊且会影响结果时，先向用户追问一次。
+
+## 6. 添加定时汇总规则
+
+如果希望系统在固定时间主动把当天未完成任务发到微信，可以新增 `reminder_rules` 规则。规则到点后会查询当天未完成任务，按优先级降序整理，并执行：
+
+```bash
+cc-connect send -p my-project -m "<提醒文本>"
+```
+
+新增每日 09:00 汇总提醒：
+
+```bash
+python3 scripts/add_reminder_rule.py --name "每日待办提醒" --kind daily --time 09:00
+```
+
+新增单次提醒：
+
+```bash
+python3 scripts/add_reminder_rule.py --name "今天晚间提醒" --kind once --date 2026-06-14 --time 21:30
+```
+
+规则说明：
+
+- `daily`：每天指定时间提醒。
+- `once`：指定日期和时间提醒，触发后自动禁用。
+- `weekly`：每周指定星期提醒，`--day` 为 `0-6`，其中 `0` 表示周一。
+- `monthly`：每月指定日期提醒，`--day` 为 `1-31`。
+- 如果微信里只说“提醒我未完成任务”但没有时间，必须先追问。

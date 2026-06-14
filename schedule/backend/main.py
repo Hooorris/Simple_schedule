@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-import sqlite3, os, threading, time, json
+import sqlite3, os, threading, time, json, subprocess
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date as date_cls
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 from fastapi import FastAPI, HTTPException, Query
@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "schedule.db")
+CC_CONNECT_PROJECT = os.environ.get("CC_CONNECT_PROJECT", "my-project")
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -49,6 +50,18 @@ def get_db():
             "day INTEGER,"
             "enabled INTEGER DEFAULT 1,"
             "webhook TEXT,"
+            "last_triggered TEXT,"
+            "created_at TEXT DEFAULT (datetime('now'))"
+            ")"
+        )
+        conn.execute("CREATE TABLE IF NOT EXISTS reminder_rules ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "name TEXT NOT NULL,"
+            "kind TEXT NOT NULL,"
+            "time TEXT NOT NULL,"
+            "date TEXT,"
+            "day INTEGER,"
+            "enabled INTEGER DEFAULT 1,"
             "last_triggered TEXT,"
             "created_at TEXT DEFAULT (datetime('now'))"
             ")"
@@ -99,6 +112,42 @@ class ReminderUpdate(BaseModel):
     webhook: Optional[str] = None
 
 
+class ReminderRuleCreate(BaseModel):
+    name: str
+    kind: str
+    time: str
+    date: Optional[str] = None
+    day: Optional[int] = None
+    enabled: Optional[bool] = True
+
+
+class ReminderRuleUpdate(BaseModel):
+    name: Optional[str] = None
+    kind: Optional[str] = None
+    time: Optional[str] = None
+    date: Optional[str] = None
+    day: Optional[int] = None
+    enabled: Optional[bool] = None
+
+
+def validate_rule(kind: str, time_text: str, rule_date: Optional[str] = None, day: Optional[int] = None):
+    if kind not in {"once", "daily", "weekly", "monthly"}:
+        raise HTTPException(400, "kind must be one of once,daily,weekly,monthly")
+    if parse_hm(time_text) is None:
+        raise HTTPException(400, "time must use HH:MM")
+    if kind == "once":
+        if not rule_date:
+            raise HTTPException(400, "date is required for once rules")
+        try:
+            datetime.strptime(rule_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(400, "date must use YYYY-MM-DD")
+    if kind == "weekly" and (day is None or not 0 <= int(day) <= 6):
+        raise HTTPException(400, "day must be 0-6 for weekly rules")
+    if kind == "monthly" and (day is None or not 1 <= int(day) <= 31):
+        raise HTTPException(400, "day must be 1-31 for monthly rules")
+
+
 def notify_payload(reminder, event):
     return {
         'reminder_id': reminder['id'],
@@ -121,6 +170,51 @@ def try_post_webhook(webhook, payload):
             return resp.getcode() < 400
     except URLError:
         return False
+
+
+def get_pending_tasks_for_date(conn, target_date: str):
+    rows = conn.execute(
+        "SELECT id, title, date, priority, completed, note "
+        "FROM events "
+        "WHERE date=? AND (completed IS NULL OR completed=0) "
+        "ORDER BY priority DESC, id ASC",
+        (target_date,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def format_pending_message(tasks, target_date: str):
+    today = date_cls.today().strftime("%Y-%m-%d")
+    title = "今日未完成任务" if target_date == today else f"{target_date} 未完成任务"
+    if not tasks:
+        return "今天没有未完成任务。" if target_date == today else f"{target_date} 没有未完成任务。"
+    lines = [f"{title} {len(tasks)} 项", ""]
+    for idx, task in enumerate(tasks, 1):
+        lines.append(f"{idx}. [P{task.get('priority') or 0}] {task.get('title')}")
+        note = (task.get("note") or "").strip()
+        if note:
+            lines.append(f"   {note}")
+        if idx != len(tasks):
+            lines.append("")
+    return "\n".join(lines)
+
+
+def send_cc_connect_message(message: str):
+    try:
+        result = subprocess.run(
+            ["cc-connect", "send", "-p", CC_CONNECT_PROJECT, "-m", message],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return {
+            "ok": result.returncode == 0,
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip(),
+        }
+    except Exception as exc:
+        return {"ok": False, "stdout": "", "stderr": str(exc)}
 
 app = FastAPI(title="Schedule", version="1.0.0", docs_url="/api/docs")
 
@@ -156,14 +250,7 @@ def list_events(start: str = Query(""), end: str = Query("")):
 @app.get("/api/v1/tasks/pending")
 def list_pending_tasks(date: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$")):
     conn = get_db()
-    rows = conn.execute(
-        "SELECT id, title, date, priority, completed, note "
-        "FROM events "
-        "WHERE date=? AND (completed IS NULL OR completed=0) "
-        "ORDER BY priority DESC, id ASC",
-        (date,),
-    ).fetchall()
-    return [dict(r) for r in rows]
+    return get_pending_tasks_for_date(conn, date)
 
 @app.get("/api/v1/events/{eid}")
 def get_event(eid: int):
@@ -236,6 +323,73 @@ def trigger_reminder(rid: int):
     return {'ok': True, 'webhook_called': ok, 'payload': payload}
 
 
+@app.post("/api/v1/reminder-rules", status_code=201)
+def create_reminder_rule(rule: ReminderRuleCreate):
+    validate_rule(rule.kind, rule.time, rule.date, rule.day)
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO reminder_rules (name, kind, time, date, day, enabled) VALUES (?,?,?,?,?,?)",
+        (rule.name, rule.kind, rule.time, rule.date, rule.day, 1 if rule.enabled else 0),
+    )
+    conn.commit()
+    return dict(conn.execute("SELECT * FROM reminder_rules WHERE id=?", (cur.lastrowid,)).fetchone())
+
+
+@app.get("/api/v1/reminder-rules")
+def list_reminder_rules():
+    rows = get_db().execute("SELECT * FROM reminder_rules ORDER BY enabled DESC, time, id").fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.put("/api/v1/reminder-rules/{rid}")
+def update_reminder_rule(rid: int, body: ReminderRuleUpdate):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM reminder_rules WHERE id=?", (rid,)).fetchone()
+    if not row:
+        raise HTTPException(404)
+    data = dict(row)
+    if body.name is not None: data["name"] = body.name
+    if body.kind is not None: data["kind"] = body.kind
+    if body.time is not None: data["time"] = body.time
+    if body.date is not None: data["date"] = body.date
+    if body.day is not None: data["day"] = body.day
+    if body.enabled is not None: data["enabled"] = 1 if body.enabled else 0
+    validate_rule(data["kind"], data["time"], data.get("date"), data.get("day"))
+    conn.execute(
+        "UPDATE reminder_rules SET name=?, kind=?, time=?, date=?, day=?, enabled=? WHERE id=?",
+        (data["name"], data["kind"], data["time"], data.get("date"), data.get("day"), data["enabled"], rid),
+    )
+    conn.commit()
+    return dict(conn.execute("SELECT * FROM reminder_rules WHERE id=?", (rid,)).fetchone())
+
+
+@app.delete("/api/v1/reminder-rules/{rid}")
+def delete_reminder_rule(rid: int):
+    conn = get_db()
+    conn.execute("DELETE FROM reminder_rules WHERE id=?", (rid,))
+    conn.commit()
+    return {"ok": True}
+
+
+@app.post("/api/v1/reminder-rules/{rid}/trigger")
+def trigger_reminder_rule(rid: int):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM reminder_rules WHERE id=?", (rid,)).fetchone()
+    if not row:
+        raise HTTPException(404)
+    rule = dict(row)
+    target_date = date_cls.today().strftime("%Y-%m-%d")
+    tasks = get_pending_tasks_for_date(conn, target_date)
+    message = format_pending_message(tasks, target_date)
+    sent = send_cc_connect_message(message)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("UPDATE reminder_rules SET last_triggered=? WHERE id=?", (now, rid))
+    if rule.get("kind") == "once":
+        conn.execute("UPDATE reminder_rules SET enabled=0 WHERE id=?", (rid,))
+    conn.commit()
+    return {"ok": True, "sent": sent, "message": message}
+
+
 def parse_hm(s: str):
     try:
         parts = s.split(':')
@@ -296,12 +450,50 @@ def check_and_fire_recurring(conn, rem, now_dt):
     return False
 
 
+def rule_should_fire(rule, now_dt):
+    hour_min = parse_hm(rule.get("time", "00:00"))
+    if not hour_min:
+        return False
+    kind = rule.get("kind")
+    scheduled_dt = datetime(now_dt.year, now_dt.month, now_dt.day, hour_min[0], hour_min[1])
+    last = rule.get("last_triggered")
+    if last and datetime.strptime(last, "%Y-%m-%d %H:%M:%S") >= scheduled_dt:
+        return False
+    if scheduled_dt > now_dt:
+        return False
+    if kind == "daily":
+        return True
+    if kind == "once":
+        if not rule.get("date"):
+            return False
+        try:
+            return datetime.strptime(rule["date"] + " " + rule["time"], "%Y-%m-%d %H:%M") <= now_dt and not last
+        except ValueError:
+            return False
+    if kind == "weekly":
+        return rule.get("day") is not None and now_dt.weekday() == int(rule["day"])
+    if kind == "monthly":
+        return rule.get("day") is not None and now_dt.day == int(rule["day"])
+    return False
+
+
+def fire_reminder_rule(conn, rule, now_dt):
+    target_date = date_cls.today().strftime("%Y-%m-%d")
+    tasks = get_pending_tasks_for_date(conn, target_date)
+    message = format_pending_message(tasks, target_date)
+    sent = send_cc_connect_message(message)
+    conn.execute("UPDATE reminder_rules SET last_triggered=? WHERE id=?",
+        (now_dt.strftime("%Y-%m-%d %H:%M:%S"), rule["id"]))
+    if rule.get("kind") == "once":
+        conn.execute("UPDATE reminder_rules SET enabled=0 WHERE id=?", (rule["id"],))
+    return sent
+
+
 def reminder_worker():
     while True:
         try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            now_dt = datetime.utcnow()
+            conn = get_db()
+            now_dt = datetime.now()
             rows = conn.execute('SELECT * FROM reminders WHERE enabled=1').fetchall()
             for r in rows:
                 rem = dict(r)
@@ -309,6 +501,11 @@ def reminder_worker():
                     check_and_fire_once(conn, rem, now_dt)
                 else:
                     check_and_fire_recurring(conn, rem, now_dt)
+            rule_rows = conn.execute("SELECT * FROM reminder_rules WHERE enabled=1").fetchall()
+            for r in rule_rows:
+                rule = dict(r)
+                if rule_should_fire(rule, now_dt):
+                    fire_reminder_rule(conn, rule, now_dt)
             conn.commit()
             conn.close()
         except Exception:

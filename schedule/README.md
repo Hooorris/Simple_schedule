@@ -57,6 +57,8 @@ chmod +x start.sh
  - 手机提醒推荐使用 cc-connect Cron 调用 `/api/v1/tasks/pending`，配置说明见 `docs/cc-connect-reminder.md`。
  - 通过微信/cc-connect 新增提醒时，可使用本地脚本：
 	 `python3 scripts/add_reminder.py --title "写周报" --date 2026-06-15 --priority 5 --note "下班前完成"`
+ - 添加定时汇总提醒规则时，可使用：
+	 `python3 scripts/add_reminder_rule.py --name "每日待办提醒" --kind daily --time 09:00`
 
 如需进一步改进：
 
