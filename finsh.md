@@ -51,4 +51,14 @@
 - 自查：已在本地创建含提醒的事件，并观察到 reminders 表记录；手动触发 `/api/v1/reminders/{id}/trigger` 返回 payload 并可将 `enabled` 置为 false（单次提醒）。
 - 状态：已完成并推送到 `origin/main`（commit 90d7cf8）
 
+### 修订：修复 reminders 表创建与本地 webhook 验证
+- 版本：patch-2026-06-13
+- 修改文件：
+  - schedule/backend/main.py
+- 实现内容：
+  - 修复 `reminders` 的 CREATE TABLE 语句（关闭括号并在迁移后调用 `conn.commit()`），避免运行时 sqlite 错误 "no such table: reminders"。
+  - 启动后端并在本地运行 webhook 接收器（port 9999），验证 `POST /api/v1/reminders` 返回 201 且 `POST /api/v1/reminders/{id}/trigger` 能成功调用 webhook 并返回 payload。
+- 自查：在本地环境完成如下验证：创建提醒 -> 返回 201；调用 trigger -> 本地 webhook 成功接收 JSON 负载。
+- 状态：已完成并推送到 `origin/main`（commit patch-2026-06-13）
+
 
