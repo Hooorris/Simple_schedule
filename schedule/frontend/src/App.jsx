@@ -61,6 +61,12 @@ export default function App() {
   const add = async (data) => {
     const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
     if (!r.ok) throw new Error((await r.json()).detail || 'Failed')
+    const created = await r.json()
+    // 如果有 reminder 配置，创建 reminder
+    if (data.reminder) {
+      const rem = Object.assign({}, data.reminder, { event_id: created.id })
+      await fetch('/api/v1/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rem) })
+    }
     await fetchEvents()
   }
 
