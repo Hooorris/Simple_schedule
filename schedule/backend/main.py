@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-import sqlite3, os, threading, time, json
+import sqlite3, os
 from typing import Optional
-from datetime import datetime
-from urllib.request import Request, urlopen
-from urllib.error import URLError
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -39,19 +36,6 @@ def get_db():
         if 'end_time' not in cols:
             # 保留 end_time 以便在标记完成时记录结束时间
             conn.execute("ALTER TABLE events ADD COLUMN end_time TEXT")
-        # reminders 表：用于注册事件的提醒（支持 once/daily/weekly/monthly）
-        conn.execute("CREATE TABLE IF NOT EXISTS reminders ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "event_id INTEGER NOT NULL,"
-            "kind TEXT NOT NULL,"
-            "time TEXT NOT NULL,"
-            "date TEXT,"
-            "day INTEGER,"
-            "enabled INTEGER DEFAULT 1,"
-            "webhook TEXT,"
-            "last_triggered TEXT,"
-            "created_at TEXT DEFAULT (datetime('now'))"
-        )
     except Exception:
         pass
     return conn
@@ -76,49 +60,6 @@ class EventUpdate(BaseModel):
 
 class BatchDelete(BaseModel):
     ids: list[int]
-
-
-class ReminderCreate(BaseModel):
-    event_id: int
-    kind: str  # once,daily,weekly,monthly
-    time: str  # HH:MM
-    date: Optional[str] = None  # for once
-    day: Optional[int] = None  # for weekly (0-6) or monthly (1-31)
-    enabled: Optional[bool] = True
-    webhook: Optional[str] = None
-
-
-class ReminderUpdate(BaseModel):
-    kind: Optional[str] = None
-    time: Optional[str] = None
-    date: Optional[str] = None
-    day: Optional[int] = None
-    enabled: Optional[bool] = None
-    webhook: Optional[str] = None
-
-
-def notify_payload(reminder, event):
-    return {
-        'reminder_id': reminder['id'],
-        'event_id': reminder['event_id'],
-        'event_title': event.get('title'),
-        'date': event.get('date'),
-        'priority': event.get('priority'),
-        'note': event.get('note'),
-        'kind': reminder.get('kind'),
-        'time': reminder.get('time')
-    }
-
-
-def try_post_webhook(webhook, payload):
-    if not webhook:
-        return False
-    try:
-        req = Request(webhook, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
-        with urlopen(req, timeout=5) as resp:
-            return resp.getcode() < 400
-    except URLError:
-        return False
 
 app = FastAPI(title="Schedule", version="1.0.0", docs_url="/api/docs")
 
@@ -156,155 +97,6 @@ def get_event(eid: int):
     row = get_db().execute("SELECT * FROM events WHERE id=?", (eid,)).fetchone()
     if not row: raise HTTPException(404)
     return dict(row)
-
-
-@app.post('/api/v1/reminders', status_code=201)
-def create_reminder(r: ReminderCreate):
-    conn = get_db()
-    cur = conn.execute("INSERT INTO reminders (event_id, kind, time, date, day, enabled, webhook) VALUES (?,?,?,?,?,?,?)",
-                       (r.event_id, r.kind, r.time, r.date, r.day, 1 if r.enabled else 0, r.webhook))
-    conn.commit()
-    return dict(conn.execute("SELECT * FROM reminders WHERE id=?", (cur.lastrowid,)).fetchone())
-
-
-@app.get('/api/v1/reminders')
-def list_reminders(event_id: int = Query(None)):
-    conn = get_db()
-    if event_id:
-        rows = conn.execute('SELECT * FROM reminders WHERE event_id=?', (event_id,)).fetchall()
-    else:
-        rows = conn.execute('SELECT * FROM reminders').fetchall()
-    return [dict(r) for r in rows]
-
-
-@app.put('/api/v1/reminders/{rid}')
-def update_reminder(rid: int, body: ReminderUpdate):
-    conn = get_db()
-    row = conn.execute('SELECT * FROM reminders WHERE id=?', (rid,)).fetchone()
-    if not row: raise HTTPException(404)
-    data = dict(row)
-    if body.kind is not None: data['kind'] = body.kind
-    if body.time is not None: data['time'] = body.time
-    if body.date is not None: data['date'] = body.date
-    if body.day is not None: data['day'] = body.day
-    if body.enabled is not None: data['enabled'] = 1 if body.enabled else 0
-    if body.webhook is not None: data['webhook'] = body.webhook
-    conn.execute('UPDATE reminders SET kind=?, time=?, date=?, day=?, enabled=?, webhook=? WHERE id=?',
-                 (data['kind'], data['time'], data['date'], data['day'], data['enabled'], data['webhook'], rid))
-    conn.commit()
-    return dict(conn.execute('SELECT * FROM reminders WHERE id=?', (rid,)).fetchone())
-
-
-@app.delete('/api/v1/reminders/{rid}')
-def delete_reminder(rid: int):
-    conn = get_db()
-    conn.execute('DELETE FROM reminders WHERE id=?', (rid,))
-    conn.commit()
-    return {'ok': True}
-
-
-@app.post('/api/v1/reminders/{rid}/trigger')
-def trigger_reminder(rid: int):
-    conn = get_db()
-    r = conn.execute('SELECT * FROM reminders WHERE id=?', (rid,)).fetchone()
-    if not r: raise HTTPException(404)
-    rem = dict(r)
-    ev = conn.execute('SELECT * FROM events WHERE id=?', (rem['event_id'],)).fetchone()
-    evd = dict(ev) if ev else {}
-    payload = notify_payload(rem, evd)
-    ok = try_post_webhook(rem.get('webhook'), payload) if rem.get('webhook') else False
-    # update last_triggered and disable if once
-    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-    conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now, rid))
-    if rem.get('kind') == 'once':
-        conn.execute('UPDATE reminders SET enabled=0 WHERE id=?', (rid,))
-    conn.commit()
-    return {'ok': True, 'webhook_called': ok, 'payload': payload}
-
-
-def parse_hm(s: str):
-    try:
-        parts = s.split(':')
-        return int(parts[0]), int(parts[1])
-    except Exception:
-        return None
-
-
-def check_and_fire_once(conn, rem, now_dt):
-    # rem['date'] expected YYYY-MM-DD, rem['time'] HH:MM
-    if not rem.get('date'): return False
-    try:
-        scheduled = datetime.strptime(rem['date'] + ' ' + rem['time'], '%Y-%m-%d %H:%M')
-    except Exception:
-        return False
-    last = rem.get('last_triggered')
-    if scheduled <= now_dt and (not last):
-        # trigger
-        conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
-        conn.execute('UPDATE reminders SET enabled=0 WHERE id=?', (rem['id'],))
-        ev = conn.execute('SELECT * FROM events WHERE id=?', (rem['event_id'],)).fetchone()
-        try_post_webhook(rem.get('webhook'), notify_payload(rem, dict(ev) if ev else {}))
-        return True
-    return False
-
-
-def check_and_fire_recurring(conn, rem, now_dt):
-    # daily/weekly/monthly recurring checks
-    kind = rem.get('kind')
-    hour_min = parse_hm(rem.get('time','00:00'))
-    if not hour_min: return False
-    scheduled_dt = datetime(now_dt.year, now_dt.month, now_dt.day, hour_min[0], hour_min[1])
-    last = rem.get('last_triggered')
-    if kind == 'daily':
-        if scheduled_dt <= now_dt:
-            if not last or datetime.strptime(last, '%Y-%m-%d %H:%M:%S') < scheduled_dt:
-                conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
-                ev = conn.execute('SELECT * FROM events WHERE id=?', (rem['event_id'],)).fetchone()
-                try_post_webhook(rem.get('webhook'), notify_payload(rem, dict(ev) if ev else {}))
-                return True
-    elif kind == 'weekly':
-        # rem['day'] holds weekday 0-6
-        if rem.get('day') is None: return False
-        if now_dt.weekday() == int(rem.get('day')) and scheduled_dt <= now_dt:
-            if not last or datetime.strptime(last, '%Y-%m-%d %H:%M:%S') < scheduled_dt:
-                conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
-                ev = conn.execute('SELECT * FROM events WHERE id=?', (rem['event_id'],)).fetchone()
-                try_post_webhook(rem.get('webhook'), notify_payload(rem, dict(ev) if ev else {}))
-                return True
-    elif kind == 'monthly':
-        if rem.get('day') is None: return False
-        if now_dt.day == int(rem.get('day')) and scheduled_dt <= now_dt:
-            if not last or datetime.strptime(last, '%Y-%m-%d %H:%M:%S') < scheduled_dt:
-                conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
-                ev = conn.execute('SELECT * FROM events WHERE id=?', (rem['event_id'],)).fetchone()
-                try_post_webhook(rem.get('webhook'), notify_payload(rem, dict(ev) if ev else {}))
-                return True
-    return False
-
-
-def reminder_worker():
-    while True:
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            now_dt = datetime.utcnow()
-            rows = conn.execute('SELECT * FROM reminders WHERE enabled=1').fetchall()
-            for r in rows:
-                rem = dict(r)
-                if rem.get('kind') == 'once':
-                    check_and_fire_once(conn, rem, now_dt)
-                else:
-                    check_and_fire_recurring(conn, rem, now_dt)
-            conn.commit()
-            conn.close()
-        except Exception:
-            pass
-        time.sleep(30)
-
-
-def start_reminder_thread():
-    t = threading.Thread(target=reminder_worker, daemon=True)
-    t.start()
 
 @app.post("/api/v1/events", status_code=201)
 def create_event(ev: EventCreate):
@@ -371,9 +163,4 @@ def batch_delete(body: BatchDelete):
 if __name__ == "__main__":
     import uvicorn, sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
-    # 启动提醒后台线程
-    try:
-        start_reminder_thread()
-    except Exception:
-        pass
     uvicorn.run(app, host="0.0.0.0", port=port)
