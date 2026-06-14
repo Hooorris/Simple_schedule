@@ -26,7 +26,7 @@ export default function Calendar({ year, month, selDate, busyDates, eventsByDate
           const isSel = ds === selDate
           const busy = busyDates.has(ds)
           // compute background and text classes explicitly
-          const base = 'h-20 p-1 cursor-pointer transition-colors'
+          const base = 'h-16 p-1 cursor-pointer transition-colors'
           const bg = isSel ? 'bg-blue-50' : 'bg-white'
           let cls = `${base} ${bg} hover:bg-blue-50`
           const dayEvents = eventsByDate[ds] || []
@@ -35,10 +35,10 @@ export default function Calendar({ year, month, selDate, busyDates, eventsByDate
           return (
             <div key={ds} onClick={() => onSelect(ds)} className={cls}>
               <div className={"text-sm font-medium " + (isToday ? 'text-green-600' : 'text-gray-800')}>{d}</div>
-              {busy && !isToday && <div className="w-1.5 h-1.5 rounded-full mx-auto mt-1 bg-gray-400" />}
+              {/* 圆点显示已移除 */}
               {/* 显示当天事件计数：待办 / 已完成 */}
               {dayEvents.length > 0 && (
-                <div className="mt-1 text-xs">
+                <div className="mt-0.5 text-xs leading-tight">
                   <div className="text-yellow-600">待办：{pendingCount}</div>
                   <div className="text-green-600">已完成：{doneCount}</div>
                 </div>

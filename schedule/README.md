@@ -13,6 +13,7 @@
 - 基于 SQLite 的轻量持久化（events 表）
 - 提供 CRUD REST API：`/api/v1/events`
 - 前端按月拉取并显示事件，支持添加、编辑、删除、多选删除
+- 提供 cc-connect Cron 可调用的未完成任务 API，用于手机提醒
 
 快速开始：
 
@@ -38,6 +39,7 @@ chmod +x start.sh
 常见 API:
 
 - `GET /api/v1/events?start=YYYY-MM-DD&end=YYYY-MM-DD` — 列出指定范围内事件
+- `GET /api/v1/tasks/pending?date=YYYY-MM-DD` — 列出指定日期未完成任务，按优先级降序
 - `GET /api/v1/events/{id}` — 获取事件
 - `POST /api/v1/events` — 创建事件，JSON body 包含 `title`, `start_time`, `end_time?(optional)`, `note?(optional)`
 - `PUT /api/v1/events/{id}` — 更新事件（部分字段可选）
@@ -52,10 +54,10 @@ chmod +x start.sh
  - 事件模型已调整：不再记录开始/结束时间；改为使用 `date`（YYYY-MM-DD）、`priority`（整数，越大优先级越高）和 `completed`（布尔）。
  - `POST /api/v1/events` 的 body 示例：
 	 `{ "title": "任务", "date": "2026-06-13", "priority": 5, "completed": false, "note": "可选" }`
+ - 手机提醒推荐使用 cc-connect Cron 调用 `/api/v1/tasks/pending`，配置说明见 `docs/cc-connect-reminder.md`。
 
 如需进一步改进：
 
 - 增加用户认证和多用户支持
 - 更健壮的时间/时区处理（使用 `pytz` / `zoneinfo`）
 - 将 SQLite 替换为 PostgreSQL 等生产级数据库
-

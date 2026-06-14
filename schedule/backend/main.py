@@ -51,7 +51,9 @@ def get_db():
             "webhook TEXT,"
             "last_triggered TEXT,"
             "created_at TEXT DEFAULT (datetime('now'))"
+            ")"
         )
+        conn.commit()
     except Exception:
         pass
     return conn
@@ -149,6 +151,18 @@ def list_events(start: str = Query(""), end: str = Query("")):
         rows = conn.execute(f"SELECT * FROM events WHERE date BETWEEN ? AND ? {order_clause}", (start, end)).fetchall()
     else:
         rows = conn.execute(f"SELECT * FROM events {order_clause}").fetchall()
+    return [dict(r) for r in rows]
+
+@app.get("/api/v1/tasks/pending")
+def list_pending_tasks(date: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$")):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, title, date, priority, completed, note "
+        "FROM events "
+        "WHERE date=? AND (completed IS NULL OR completed=0) "
+        "ORDER BY priority DESC, id ASC",
+        (date,),
+    ).fetchall()
     return [dict(r) for r in rows]
 
 @app.get("/api/v1/events/{eid}")
