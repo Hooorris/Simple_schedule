@@ -14,6 +14,7 @@
 - 提供 CRUD REST API：`/api/v1/events`
 - 前端按月拉取并显示事件，支持添加、编辑、删除、多选删除
 - 提供 cc-connect Cron 可调用的未完成任务 API，用于手机提醒
+- 每天 23:59 自动将当天未完成任务延期到第二天
 
 快速开始：
 
@@ -40,6 +41,7 @@ chmod +x start.sh
 
 - `GET /api/v1/events?start=YYYY-MM-DD&end=YYYY-MM-DD` — 列出指定范围内事件
 - `GET /api/v1/tasks/pending?date=YYYY-MM-DD` — 列出指定日期未完成任务，按优先级降序
+- `POST /api/v1/tasks/postpone-unfinished` — 将指定日期未完成任务延期到第二天，body 可选：`{ "date": "YYYY-MM-DD" }`
 - `GET /api/v1/events/{id}` — 获取事件
 - `POST /api/v1/events` — 创建事件，JSON body 包含 `title`, `start_time`, `end_time?(optional)`, `note?(optional)`
 - `PUT /api/v1/events/{id}` — 更新事件（部分字段可选）
@@ -59,6 +61,9 @@ chmod +x start.sh
 	 `python3 scripts/add_reminder.py --title "写周报" --date 2026-06-15 --priority 5 --note "下班前完成"`
  - 添加定时汇总提醒规则时，可使用：
 	 `python3 scripts/add_reminder_rule.py --name "每日待办提醒" --kind daily --time 09:00`
+ - 手动延期某天未完成任务到第二天时，可使用：
+	 `python3 scripts/postpone_unfinished.py --date 2026-06-15`
+ - 后端启动后会在每天本地时间 23:59 自动延期当天未完成任务；如需调整时间，可设置环境变量 `AUTO_POSTPONE_TIME=HH:MM`。
 
 如需进一步改进：
 

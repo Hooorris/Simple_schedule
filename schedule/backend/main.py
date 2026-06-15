@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sqlite3, os, threading, time, json, subprocess
 from typing import Optional
-from datetime import datetime, date as date_cls
+from datetime import datetime, date as date_cls, timedelta
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 from fastapi import FastAPI, HTTPException, Query
@@ -10,6 +10,8 @@ from pydantic import BaseModel
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "schedule.db")
 CC_CONNECT_PROJECT = os.environ.get("CC_CONNECT_PROJECT", "my-project")
+AUTO_POSTPONE_TIME = os.environ.get("AUTO_POSTPONE_TIME", "23:59")
+AUTO_POSTPONE_STATE_KEY = "auto_postpone_unfinished_last_date"
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -66,6 +68,12 @@ def get_db():
             "created_at TEXT DEFAULT (datetime('now'))"
             ")"
         )
+        conn.execute("CREATE TABLE IF NOT EXISTS app_state ("
+            "key TEXT PRIMARY KEY,"
+            "value TEXT NOT NULL,"
+            "updated_at TEXT DEFAULT (datetime('now'))"
+            ")"
+        )
         conn.commit()
     except Exception:
         pass
@@ -91,6 +99,10 @@ class EventUpdate(BaseModel):
 
 class BatchDelete(BaseModel):
     ids: list[int]
+
+
+class PostponeUnfinishedRequest(BaseModel):
+    date: Optional[str] = None
 
 
 class ReminderCreate(BaseModel):
@@ -183,6 +195,51 @@ def get_pending_tasks_for_date(conn, target_date: str):
     return [dict(r) for r in rows]
 
 
+def validate_date_text(value: str):
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "date must use YYYY-MM-DD")
+
+
+def postpone_unfinished_tasks(conn, source_date: str):
+    validate_date_text(source_date)
+    target_date = (
+        datetime.strptime(source_date, "%Y-%m-%d") + timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+    tasks = get_pending_tasks_for_date(conn, source_date)
+    if not tasks:
+        return {
+            "ok": True,
+            "from_date": source_date,
+            "to_date": target_date,
+            "moved": 0,
+            "tasks": [],
+        }
+
+    ids = [task["id"] for task in tasks]
+    placeholders = ",".join("?" for _ in ids)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+    params = [target_date]
+    if "start_time" in cols:
+        set_clause = "date=?, start_time=?, updated_at=datetime('now')"
+        params.append(f"{target_date}T00:00:00")
+    else:
+        set_clause = "date=?, updated_at=datetime('now')"
+    params.extend(ids)
+    conn.execute(
+        f"UPDATE events SET {set_clause} WHERE id IN ({placeholders})",
+        params,
+    )
+    return {
+        "ok": True,
+        "from_date": source_date,
+        "to_date": target_date,
+        "moved": len(tasks),
+        "tasks": tasks,
+    }
+
+
 def format_pending_message(tasks, target_date: str):
     today = date_cls.today().strftime("%Y-%m-%d")
     title = "今日未完成任务" if target_date == today else f"{target_date} 未完成任务"
@@ -251,6 +308,15 @@ def list_events(start: str = Query(""), end: str = Query("")):
 def list_pending_tasks(date: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$")):
     conn = get_db()
     return get_pending_tasks_for_date(conn, date)
+
+
+@app.post("/api/v1/tasks/postpone-unfinished")
+def postpone_unfinished(body: Optional[PostponeUnfinishedRequest] = None):
+    target_date = (body.date if body else None) or date_cls.today().strftime("%Y-%m-%d")
+    conn = get_db()
+    result = postpone_unfinished_tasks(conn, target_date)
+    conn.commit()
+    return result
 
 @app.get("/api/v1/events/{eid}")
 def get_event(eid: int):
@@ -393,7 +459,10 @@ def trigger_reminder_rule(rid: int):
 def parse_hm(s: str):
     try:
         parts = s.split(':')
-        return int(parts[0]), int(parts[1])
+        hour, minute = int(parts[0]), int(parts[1])
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
+        return None
     except Exception:
         return None
 
@@ -489,6 +558,32 @@ def fire_reminder_rule(conn, rule, now_dt):
     return sent
 
 
+def auto_postpone_should_fire(conn, now_dt):
+    hour_min = parse_hm(AUTO_POSTPONE_TIME)
+    if not hour_min:
+        return False
+    scheduled_dt = datetime(now_dt.year, now_dt.month, now_dt.day, hour_min[0], hour_min[1])
+    if scheduled_dt > now_dt:
+        return False
+    today = now_dt.strftime("%Y-%m-%d")
+    row = conn.execute(
+        "SELECT value FROM app_state WHERE key=?",
+        (AUTO_POSTPONE_STATE_KEY,),
+    ).fetchone()
+    return not row or row["value"] != today
+
+
+def fire_auto_postpone(conn, now_dt):
+    today = now_dt.strftime("%Y-%m-%d")
+    result = postpone_unfinished_tasks(conn, today)
+    conn.execute(
+        "INSERT INTO app_state (key, value, updated_at) VALUES (?,?,datetime('now')) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')",
+        (AUTO_POSTPONE_STATE_KEY, today),
+    )
+    return result
+
+
 def reminder_worker():
     while True:
         try:
@@ -506,6 +601,8 @@ def reminder_worker():
                 rule = dict(r)
                 if rule_should_fire(rule, now_dt):
                     fire_reminder_rule(conn, rule, now_dt)
+            if auto_postpone_should_fire(conn, now_dt):
+                fire_auto_postpone(conn, now_dt)
             conn.commit()
             conn.close()
         except Exception:
