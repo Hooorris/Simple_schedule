@@ -6,13 +6,13 @@ name = "my-project"
 [projects.agent]
 type = "codex"
 [projects.agent.options]
-work_dir = "/Users/horris/Documents/Codex/2026-06-10/iphone"
+work_dir = "/Users/horris/Documents/Codex/schedule"
 mode = "full-auto"
 
 [[projects.platforms]]
 type = "weixin"
 
 [projects.platforms.options]
-token = "0f993b7a8d34@im.bot:0600005dd3b99f369351bd6619cc75c6a385c3"
+token = "REPLACE_WITH_WEIXIN_BOT_TOKEN"
 base_url = "https://ilinkai.weixin.qq.com"
-account_id = "0f993b7a8d34@im.bot"
+account_id = "REPLACE_WITH_WEIXIN_ACCOUNT_ID"
