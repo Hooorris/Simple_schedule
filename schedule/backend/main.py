@@ -188,11 +188,43 @@ def get_pending_tasks_for_date(conn, target_date: str):
     rows = conn.execute(
         "SELECT id, title, date, priority, completed, note "
         "FROM events "
-        "WHERE date=? AND (completed IS NULL OR completed=0) "
+        "WHERE date<=? AND (completed IS NULL OR completed=0) "
         "ORDER BY priority DESC, id ASC",
         (target_date,),
     ).fetchall()
-    return [dict(r) for r in rows]
+    tasks = []
+    for row in rows:
+        task = dict(row)
+        task["display_date"] = target_date
+        tasks.append(task)
+    return tasks
+
+
+def row_with_display_date(row, target_date: str):
+    item = dict(row)
+    if not item.get("completed") and item.get("date") and item["date"] <= target_date:
+        item["display_date"] = target_date
+    else:
+        item["display_date"] = item.get("date")
+    return item
+
+
+def list_events_for_display(conn, start: str = "", end: str = ""):
+    today = date_cls.today().strftime("%Y-%m-%d")
+    display_date = today
+    if start and end:
+        rows = conn.execute(
+            "SELECT * FROM events "
+            "WHERE (completed=1 AND date BETWEEN ? AND ?) "
+            "   OR ((completed IS NULL OR completed=0) AND date<=?) "
+            "ORDER BY completed ASC, priority DESC, date, id",
+            (start, end, display_date),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM events ORDER BY completed ASC, priority DESC, date, id"
+        ).fetchall()
+    return [row_with_display_date(row, display_date) for row in rows]
 
 
 def validate_date_text(value: str):
@@ -278,31 +310,14 @@ app = FastAPI(title="Schedule", version="1.0.0", docs_url="/api/docs")
 @app.get("/api/v1/db-events")
 def db_events_direct(start: str = "", end: str = ""):
     conn = get_db()
-    if start and end:
-        rows = conn.execute("SELECT * FROM events WHERE date BETWEEN ? AND ? ORDER BY priority DESC, date", (start, end)).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM events ORDER BY priority DESC, date").fetchall()
-    return [dict(r) for r in rows]
+    return list_events_for_display(conn, start, end)
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/api/v1/events")
 def list_events(start: str = Query(""), end: str = Query("")):
     conn = get_db()
-    # 动态检测列以兼容老 schema（避免 ORDER BY 缺失列时报错）
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
-    # 优先把未完成项放前面（completed ASC），已完成项靠后；若无 completed 列则按 priority 排序
-    if 'completed' in cols and 'priority' in cols:
-        order_clause = "ORDER BY completed ASC, priority DESC, date"
-    elif 'priority' in cols:
-        order_clause = "ORDER BY priority DESC, date"
-    else:
-        order_clause = "ORDER BY date"
-    if start and end:
-        rows = conn.execute(f"SELECT * FROM events WHERE date BETWEEN ? AND ? {order_clause}", (start, end)).fetchall()
-    else:
-        rows = conn.execute(f"SELECT * FROM events {order_clause}").fetchall()
-    return [dict(r) for r in rows]
+    return list_events_for_display(conn, start, end)
 
 @app.get("/api/v1/tasks/pending")
 def list_pending_tasks(date: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$")):
@@ -601,8 +616,6 @@ def reminder_worker():
                 rule = dict(r)
                 if rule_should_fire(rule, now_dt):
                     fire_reminder_rule(conn, rule, now_dt)
-            if auto_postpone_should_fire(conn, now_dt):
-                fire_auto_postpone(conn, now_dt)
             conn.commit()
             conn.close()
         except Exception:
@@ -646,13 +659,20 @@ def update_event(eid: int, ev: EventUpdate):
         # 如果从未完成变为已完成，记录 end_time；如果从已完成变为未完成，清除 end_time（若列存在）
         if 'end_time' in cols:
             if new_completed == 1 and (not data.get('completed')):
+                completed_date = date_cls.today().strftime("%Y-%m-%d")
+                data['date'] = completed_date
+                if 'start_time' in cols:
+                    data['start_time'] = f"{completed_date}T00:00:00"
                 data['end_time'] = conn.execute("SELECT datetime('now')").fetchone()[0]
             elif new_completed == 0:
                 data['end_time'] = None
         data["completed"] = new_completed
     if ev.note is not None: data["note"] = ev.note
     # 构建更新语句，包含 end_time 如果存在
-    if 'end_time' in cols:
+    if 'end_time' in cols and 'start_time' in cols:
+        conn.execute("UPDATE events SET title=?, date=?, priority=?, completed=?, note=?, start_time=?, end_time=?, updated_at=datetime('now') WHERE id=?",
+            (data["title"], data["date"], data["priority"], data["completed"], data["note"], data.get('start_time'), data.get('end_time'), eid))
+    elif 'end_time' in cols:
         conn.execute("UPDATE events SET title=?, date=?, priority=?, completed=?, note=?, end_time=?, updated_at=datetime('now') WHERE id=?",
             (data["title"], data["date"], data["priority"], data["completed"], data["note"], data.get('end_time'), eid))
     else:

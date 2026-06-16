@@ -36,8 +36,8 @@ export default function App() {
 
   useEffect(() => { fetchEvents() }, [fetchEvents])
 
-  // 按选中日期筛选事件 — 后端现在使用 `date` 字段（YYYY-MM-DD）
-  const dayEvents = events.filter(e => e.date === selDate)
+  const eventDisplayDate = (event) => event.display_date || event.date
+  const dayEvents = events.filter(e => eventDisplayDate(e) === selDate)
   // 未完成的放前面，已完成的靠后；同一状态下按优先级降序
   const sortedDayEvents = [...dayEvents].sort((a, b) => {
     const aDone = a.completed ? 1 : 0
@@ -45,12 +45,13 @@ export default function App() {
     if (aDone !== bDone) return aDone - bDone
     return (b.priority || 0) - (a.priority || 0)
   })
-  const busyDates = new Set(events.map(e => e.date))
+  const busyDates = new Set(events.map(e => eventDisplayDate(e)))
   // 将事件按日期分组并按优先级排序，供 Calendar 渲染每日缩略
   const eventsByDate = events.reduce((acc, e) => {
-    if (!e.date) return acc
-    acc[e.date] = acc[e.date] || []
-    acc[e.date].push(e)
+    const displayDate = eventDisplayDate(e)
+    if (!displayDate) return acc
+    acc[displayDate] = acc[displayDate] || []
+    acc[displayDate].push(e)
     return acc
   }, {})
   Object.keys(eventsByDate).forEach(d => {
