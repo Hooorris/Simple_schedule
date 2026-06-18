@@ -143,8 +143,8 @@ class ReminderRuleUpdate(BaseModel):
 
 
 def validate_rule(kind: str, time_text: str, rule_date: Optional[str] = None, day: Optional[int] = None):
-    if kind not in {"once", "daily", "weekly", "monthly"}:
-        raise HTTPException(400, "kind must be one of once,daily,weekly,monthly")
+    if kind not in {"once", "daily", "workday", "weekly", "monthly"}:
+        raise HTTPException(400, "kind must be one of once,daily,workday,weekly,monthly")
     if parse_hm(time_text) is None:
         raise HTTPException(400, "time must use HH:MM")
     if kind == "once":
@@ -463,11 +463,12 @@ def trigger_reminder_rule(rid: int):
     tasks = get_pending_tasks_for_date(conn, target_date)
     message = format_pending_message(tasks, target_date)
     sent = send_cc_connect_message(message)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute("UPDATE reminder_rules SET last_triggered=? WHERE id=?", (now, rid))
-    if rule.get("kind") == "once":
-        conn.execute("UPDATE reminder_rules SET enabled=0 WHERE id=?", (rid,))
-    conn.commit()
+    if sent.get("ok"):
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("UPDATE reminder_rules SET last_triggered=? WHERE id=?", (now, rid))
+        if rule.get("kind") == "once":
+            conn.execute("UPDATE reminder_rules SET enabled=0 WHERE id=?", (rid,))
+        conn.commit()
     return {"ok": True, "sent": sent, "message": message}
 
 
@@ -547,6 +548,8 @@ def rule_should_fire(rule, now_dt):
         return False
     if kind == "daily":
         return True
+    if kind == "workday":
+        return now_dt.weekday() < 5
     if kind == "once":
         if not rule.get("date"):
             return False
@@ -566,11 +569,32 @@ def fire_reminder_rule(conn, rule, now_dt):
     tasks = get_pending_tasks_for_date(conn, target_date)
     message = format_pending_message(tasks, target_date)
     sent = send_cc_connect_message(message)
-    conn.execute("UPDATE reminder_rules SET last_triggered=? WHERE id=?",
-        (now_dt.strftime("%Y-%m-%d %H:%M:%S"), rule["id"]))
+    if not sent.get("ok"):
+        print(
+            f"Failed to send reminder rule {rule['id']}: "
+            f"{sent.get('stderr') or sent.get('stdout') or 'unknown error'}",
+            flush=True,
+        )
+        return sent
+    conn.execute(
+        "UPDATE reminder_rules SET last_triggered=? WHERE id=?",
+        (now_dt.strftime("%Y-%m-%d %H:%M:%S"), rule["id"]),
+    )
     if rule.get("kind") == "once":
         conn.execute("UPDATE reminder_rules SET enabled=0 WHERE id=?", (rule["id"],))
     return sent
+
+
+def cleanup_expired_once_reminders(conn, today: str):
+    reminders_deleted = conn.execute(
+        "DELETE FROM reminders WHERE kind='once' AND date IS NOT NULL AND date < ?",
+        (today,),
+    ).rowcount
+    rules_deleted = conn.execute(
+        "DELETE FROM reminder_rules WHERE kind='once' AND date IS NOT NULL AND date < ?",
+        (today,),
+    ).rowcount
+    return {"reminders_deleted": reminders_deleted, "rules_deleted": rules_deleted}
 
 
 def auto_postpone_should_fire(conn, now_dt):
@@ -604,6 +628,7 @@ def reminder_worker():
         try:
             conn = get_db()
             now_dt = datetime.now()
+            cleanup_expired_once_reminders(conn, now_dt.strftime("%Y-%m-%d"))
             rows = conn.execute('SELECT * FROM reminders WHERE enabled=1').fetchall()
             for r in rows:
                 rem = dict(r)
@@ -618,8 +643,8 @@ def reminder_worker():
                     fire_reminder_rule(conn, rule, now_dt)
             conn.commit()
             conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Reminder worker error: {exc}", flush=True)
         time.sleep(30)
 
 

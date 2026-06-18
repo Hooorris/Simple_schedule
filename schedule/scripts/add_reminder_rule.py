@@ -50,8 +50,8 @@ def ensure_schema(conn):
 
 
 def validate_rule(kind, date, day):
-    if kind not in {"once", "daily", "weekly", "monthly"}:
-        raise ValueError("kind must be one of once,daily,weekly,monthly")
+    if kind not in {"once", "daily", "workday", "weekly", "monthly"}:
+        raise ValueError("kind must be one of once,daily,workday,weekly,monthly")
     if kind == "once" and not date:
         raise ValueError("date is required for once rules")
     if kind == "weekly" and (day is None or not 0 <= day <= 6):
