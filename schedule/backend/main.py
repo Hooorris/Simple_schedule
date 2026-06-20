@@ -305,6 +305,27 @@ def send_cc_connect_message(message: str):
     except Exception as exc:
         return {"ok": False, "stdout": "", "stderr": str(exc)}
 
+
+def format_event_reminder_message(reminder, event):
+    title = event.get("title") or "日程提醒"
+    lines = [f"提醒：{title}"]
+    date_value = event.get("date")
+    time_value = reminder.get("time")
+    if date_value or time_value:
+        lines.append(f"时间：{date_value or ''} {time_value or ''}".strip())
+    note = (event.get("note") or "").strip()
+    if note:
+        lines.append(note)
+    return "\n".join(lines)
+
+
+def send_event_reminder(conn, reminder):
+    event = conn.execute("SELECT * FROM events WHERE id=?", (reminder["event_id"],)).fetchone()
+    event_data = dict(event) if event else {}
+    if reminder.get("webhook"):
+        return {"ok": try_post_webhook(reminder.get("webhook"), notify_payload(reminder, event_data))}
+    return send_cc_connect_message(format_event_reminder_message(reminder, event_data))
+
 app = FastAPI(title="Schedule", version="1.0.0", docs_url="/api/docs")
 
 @app.get("/api/v1/db-events")
@@ -492,11 +513,16 @@ def check_and_fire_once(conn, rem, now_dt):
         return False
     last = rem.get('last_triggered')
     if scheduled <= now_dt and (not last):
-        # trigger
+        sent = send_event_reminder(conn, rem)
+        if not sent.get("ok"):
+            print(
+                f"Failed to send reminder {rem['id']}: "
+                f"{sent.get('stderr') or sent.get('stdout') or 'unknown error'}",
+                flush=True,
+            )
+            return False
         conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
         conn.execute('UPDATE reminders SET enabled=0 WHERE id=?', (rem['id'],))
-        ev = conn.execute('SELECT * FROM events WHERE id=?', (rem['event_id'],)).fetchone()
-        try_post_webhook(rem.get('webhook'), notify_payload(rem, dict(ev) if ev else {}))
         return True
     return False
 
@@ -511,27 +537,27 @@ def check_and_fire_recurring(conn, rem, now_dt):
     if kind == 'daily':
         if scheduled_dt <= now_dt:
             if not last or datetime.strptime(last, '%Y-%m-%d %H:%M:%S') < scheduled_dt:
-                conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
-                ev = conn.execute('SELECT * FROM events WHERE id=?', (rem['event_id'],)).fetchone()
-                try_post_webhook(rem.get('webhook'), notify_payload(rem, dict(ev) if ev else {}))
-                return True
+                sent = send_event_reminder(conn, rem)
+                if sent.get("ok"):
+                    conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
+                    return True
     elif kind == 'weekly':
         # rem['day'] holds weekday 0-6
         if rem.get('day') is None: return False
         if now_dt.weekday() == int(rem.get('day')) and scheduled_dt <= now_dt:
             if not last or datetime.strptime(last, '%Y-%m-%d %H:%M:%S') < scheduled_dt:
-                conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
-                ev = conn.execute('SELECT * FROM events WHERE id=?', (rem['event_id'],)).fetchone()
-                try_post_webhook(rem.get('webhook'), notify_payload(rem, dict(ev) if ev else {}))
-                return True
+                sent = send_event_reminder(conn, rem)
+                if sent.get("ok"):
+                    conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
+                    return True
     elif kind == 'monthly':
         if rem.get('day') is None: return False
         if now_dt.day == int(rem.get('day')) and scheduled_dt <= now_dt:
             if not last or datetime.strptime(last, '%Y-%m-%d %H:%M:%S') < scheduled_dt:
-                conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
-                ev = conn.execute('SELECT * FROM events WHERE id=?', (rem['event_id'],)).fetchone()
-                try_post_webhook(rem.get('webhook'), notify_payload(rem, dict(ev) if ev else {}))
-                return True
+                sent = send_event_reminder(conn, rem)
+                if sent.get("ok"):
+                    conn.execute('UPDATE reminders SET last_triggered=? WHERE id=?', (now_dt.strftime('%Y-%m-%d %H:%M:%S'), rem['id']))
+                    return True
     return False
 
 

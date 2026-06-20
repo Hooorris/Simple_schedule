@@ -18,6 +18,14 @@ def valid_date(value):
     return value
 
 
+def valid_time(value):
+    try:
+        parsed = datetime.strptime(value, "%H:%M")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("time must use HH:MM") from exc
+    return parsed.strftime("%H:%M")
+
+
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -45,11 +53,25 @@ def get_db():
         conn.execute("ALTER TABLE events ADD COLUMN priority INTEGER DEFAULT 0")
     if "completed" not in cols:
         conn.execute("ALTER TABLE events ADD COLUMN completed INTEGER DEFAULT 0")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS reminders ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "event_id INTEGER NOT NULL,"
+        "kind TEXT NOT NULL,"
+        "time TEXT NOT NULL,"
+        "date TEXT,"
+        "day INTEGER,"
+        "enabled INTEGER DEFAULT 1,"
+        "webhook TEXT,"
+        "last_triggered TEXT,"
+        "created_at TEXT DEFAULT (datetime('now'))"
+        ")"
+    )
     conn.commit()
     return conn
 
 
-def add_reminder(title, date, priority, note):
+def add_reminder(title, date, priority, note, reminder_time=None):
     title = title.strip()
     note = note.strip()
     if not 1 <= len(title) <= 100:
@@ -76,7 +98,20 @@ def add_reminder(title, date, priority, note):
         )
     conn.commit()
     row = conn.execute("SELECT * FROM events WHERE id=?", (cur.lastrowid,)).fetchone()
-    return dict(row)
+    event = dict(row)
+    if reminder_time:
+        reminder_cur = conn.execute(
+            "INSERT INTO reminders (event_id, kind, time, date, enabled) "
+            "VALUES (?,?,?,?,1)",
+            (event["id"], "once", reminder_time, date),
+        )
+        conn.commit()
+        reminder = conn.execute(
+            "SELECT * FROM reminders WHERE id=?",
+            (reminder_cur.lastrowid,),
+        ).fetchone()
+        event["reminder"] = dict(reminder)
+    return event
 
 
 def main():
@@ -85,12 +120,13 @@ def main():
     )
     parser.add_argument("--title", required=True, help="Reminder title, 1-100 chars")
     parser.add_argument("--date", required=True, type=valid_date, help="YYYY-MM-DD")
+    parser.add_argument("--time", type=valid_time, help="Optional reminder time, HH:MM")
     parser.add_argument("--priority", type=int, default=0, help="Higher comes first")
     parser.add_argument("--note", default="", help="Optional note, max 500 chars")
     args = parser.parse_args()
 
     try:
-        row = add_reminder(args.title, args.date, args.priority, args.note)
+        row = add_reminder(args.title, args.date, args.priority, args.note, args.time)
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
         raise SystemExit(1)

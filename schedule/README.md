@@ -57,8 +57,8 @@ chmod +x start.sh
  - `POST /api/v1/events` 的 body 示例：
 	 `{ "title": "任务", "date": "2026-06-13", "priority": 5, "completed": false, "note": "可选" }`
  - 手机提醒推荐使用 cc-connect Cron 调用 `/api/v1/tasks/pending`，配置说明见 `docs/cc-connect-reminder.md`。
- - 通过微信/cc-connect 新增提醒时，可使用本地脚本：
-	 `python3 scripts/add_reminder.py --title "写周报" --date 2026-06-15 --priority 5 --note "下班前完成"`
+ - 通过微信/cc-connect 新增提醒时，可使用本地脚本；带具体提醒时间时传入 `--time HH:MM`，脚本会同步创建一次性提醒：
+	 `python3 scripts/add_reminder.py --title "写周报" --date 2026-06-15 --time 17:30 --priority 5 --note "下班前完成"`
  - 添加定时汇总提醒规则时，可使用：
 	 `python3 scripts/add_reminder_rule.py --name "每日待办提醒" --kind daily --time 09:00`
  - 手动延期某天未完成任务到第二天时，可使用：
